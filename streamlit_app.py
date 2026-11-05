@@ -72,6 +72,31 @@ Transcript:
     return call_gemini([prompt])
 
 
+def teach(transcript, topic):
+    prompt = f"""A first-year university student just attended a lecture on: {topic or "the topic below"}.
+Use the transcript only to see what the lecturer covered. Then teach the topic more broadly, in simple clear English.
+
+Structure your answer like this:
+## What the lecturer covered
+One or two sentences.
+## The topic explained simply
+A beginner-friendly explanation of the main ideas.
+## Extra background (not in the lecture)
+Useful context the lecturer did not mention. Label this clearly.
+## Examples
+Two or three clear examples.
+## Common mistakes
+What students often get wrong.
+## Practice questions
+Three questions, each with a short answer.
+
+Rules: do not invent facts, statistics, quotes, or sources. If you are not sure about something, say so. Do not claim the lecturer said anything that is not in the transcript.
+
+Transcript:
+{transcript}"""
+    return call_gemini([prompt])
+
+
 def build_docx(title, text, formatted):
     doc = Document()
     doc.add_heading(title, 0)
@@ -147,5 +172,30 @@ if "notes" in st.session_state:
         "Download notes (Word)",
         data=build_docx(title, st.session_state["notes"], formatted=True),
         file_name=f"{safe} - notes.docx",
+        mime=DOCX_MIME,
+    )
+
+
+if "transcript" in st.session_state:
+    st.divider()
+    st.caption("Optional: learn the topic beyond what the lecturer said.")
+    if st.button("3. Teach me this topic"):
+        with st.spinner("Preparing your lesson..."):
+            try:
+                st.session_state["lesson"] = teach(
+                    st.session_state["transcript"], topic
+                )
+            except Exception as e:
+                st.session_state.pop("lesson", None)
+                st.error(f"Something went wrong: {e}")
+
+if "lesson" in st.session_state:
+    st.subheader("Lesson (written by AI, not the lecturer)")
+    st.warning("AI can make mistakes. Check important facts in your textbook or with your lecturer.")
+    st.markdown(st.session_state["lesson"])
+    st.download_button(
+        "Download lesson (Word)",
+        data=build_docx(title, st.session_state["lesson"], formatted=True),
+        file_name=f"{safe} - lesson.docx",
         mime=DOCX_MIME,
     )
