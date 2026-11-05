@@ -23,12 +23,18 @@ def get_client():
     return genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 
 
+class BusyError(Exception):
+    """Shown to the user as a friendly message instead of a raw error."""
+
+
 def call_gemini(contents):
     client = get_client()
+    quota_hit = False
     last_error = None
     for wait in (0, 5, 10):
         if wait:
             time.sleep(wait)
+        busy_this_round = False
         for model in MODELS:
             try:
                 response = client.models.generate_content(
@@ -39,9 +45,29 @@ def call_gemini(contents):
                 return response.text
             except Exception as e:
                 last_error = e
-                if "503" not in str(e) and "UNAVAILABLE" not in str(e):
+                msg = str(e)
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    quota_hit = True  # free limit reached on this model: try the next one
+                elif "503" in msg or "UNAVAILABLE" in msg:
+                    busy_this_round = True
+                else:
                     raise
-    raise last_error
+        if not busy_this_round:
+            break  # only limits were hit, so waiting a few seconds will not help
+    if quota_hit:
+        raise BusyError(
+            "The free daily limit has been reached for now. Please try again in a few minutes, or tomorrow."
+        )
+    raise BusyError(
+        "Google's AI is very busy right now. Please wait a minute and tap the button again."
+    )
+
+
+def show_error(e):
+    if isinstance(e, BusyError):
+        st.warning(str(e))
+    else:
+        st.error(f"Something went wrong: {e}")
 
 
 def transcribe(audio_file, topic):
@@ -204,7 +230,7 @@ if st.button("1. Transcribe audio", type="primary"):
                     st.session_state.pop(k, None)
             except Exception as e:
                 st.session_state.pop("transcript", None)
-                st.error(f"Something went wrong: {e}")
+                show_error(e)
 
 if "transcript" in st.session_state:
     st.subheader("Transcript")
@@ -220,7 +246,7 @@ if "transcript" in st.session_state:
                         st.session_state.pop(k, None)
                 except Exception as e:
                     st.session_state.pop("board", None)
-                    st.error(f"Something went wrong: {e}")
+                    show_error(e)
 
 if "board" in st.session_state and "transcript" in st.session_state:
     st.subheader("Board and slides")
@@ -236,7 +262,7 @@ if "transcript" in st.session_state:
                 )
             except Exception as e:
                 st.session_state.pop("notes", None)
-                st.error(f"Something went wrong: {e}")
+                show_error(e)
 
 if "notes" in st.session_state:
     st.subheader("Notes")
@@ -253,7 +279,7 @@ if "transcript" in st.session_state:
                 )
             except Exception as e:
                 st.session_state.pop("lesson", None)
-                st.error(f"Something went wrong: {e}")
+                show_error(e)
 
 if "lesson" in st.session_state:
     st.subheader("Lesson (written by AI, not the lecturer)")
