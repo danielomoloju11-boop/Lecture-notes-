@@ -2,6 +2,7 @@ import io
 import os
 import re
 import tempfile
+import time
 
 import streamlit as st
 from docx import Document
@@ -55,10 +56,20 @@ Course/topic: {topic}
 
 Use headings, bullet points, key terms with short definitions, and a short summary at the end.
 Only use what the lecturer actually said. If something is unclear, say so instead of guessing."""
-        response = client.models.generate_content(
-            model=MODEL, contents=[prompt, uploaded]
-        )
-        return response.text
+        last_error = None
+        for wait in (0, 5, 10, 20):
+            if wait:
+                time.sleep(wait)
+            try:
+                response = client.models.generate_content(
+                    model=MODEL, contents=[prompt, uploaded]
+                )
+                return response.text
+            except Exception as e:
+                last_error = e
+                if "503" not in str(e) and "UNAVAILABLE" not in str(e):
+                    raise
+        raise last_error
     finally:
         os.remove(path)
 
