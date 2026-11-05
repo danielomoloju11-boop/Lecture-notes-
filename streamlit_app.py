@@ -8,7 +8,7 @@ import streamlit as st
 from docx import Document
 from google import genai
 
-MODEL = "gemini-flash-latest"
+MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"]
 
 st.set_page_config(page_title="Lecture Notes", page_icon="📝")
 st.title("📝 Lecture Notes")
@@ -57,18 +57,19 @@ Course/topic: {topic}
 Use headings, bullet points, key terms with short definitions, and a short summary at the end.
 Only use what the lecturer actually said. If something is unclear, say so instead of guessing."""
         last_error = None
-        for wait in (0, 5, 10, 20):
+        for wait in (0, 5, 10):
             if wait:
                 time.sleep(wait)
-            try:
-                response = client.models.generate_content(
-                    model=MODEL, contents=[prompt, uploaded]
-                )
-                return response.text
-            except Exception as e:
-                last_error = e
-                if "503" not in str(e) and "UNAVAILABLE" not in str(e):
-                    raise
+            for model in MODELS:
+                try:
+                    response = client.models.generate_content(
+                        model=model, contents=[prompt, uploaded]
+                    )
+                    return response.text
+                except Exception as e:
+                    last_error = e
+                    if "503" not in str(e) and "UNAVAILABLE" not in str(e):
+                        raise
         raise last_error
     finally:
         os.remove(path)
