@@ -10,10 +10,11 @@ from google import genai
 from google.genai import types
 
 MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"]
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 st.set_page_config(page_title="Lecture Notes", page_icon="📝")
 st.title("📝 Lecture Notes")
-st.write("Step 1: get the exact words of the lecture. Step 2: turn them into notes.")
+st.write("Step 1: get the exact words of the lecture. Step 2: turn them into notes. Step 3: learn the topic.")
 
 
 @st.cache_resource
@@ -97,39 +98,64 @@ Transcript:
     return call_gemini([prompt])
 
 
-def build_docx(title, text, formatted):
-    doc = Document()
-    doc.add_heading(title, 0)
+def add_formatted(doc, text):
+    # Headings from the AI text sit one level below the section heading.
     for line in text.split("\n"):
         line = line.strip()
         if not line:
             continue
-        if not formatted:
-            doc.add_paragraph(line)
-            continue
         clean = line.replace("**", "")
-        if line.startswith("### "):
-            doc.add_heading(clean[4:], 3)
-        elif line.startswith("## "):
-            doc.add_heading(clean[3:], 2)
-        elif line.startswith("# "):
-            doc.add_heading(clean[2:], 1)
+        m = re.match(r"^(#{1,4})\s+(.*)", clean)
+        if m:
+            level = min(len(m.group(1)) + 1, 4)
+            doc.add_heading(m.group(2), level)
         elif line.startswith(("* ", "- ")):
             doc.add_paragraph(clean[2:], style="List Bullet")
         else:
             doc.add_paragraph(clean)
+
+
+def build_full_docx(title, transcript, notes, lesson):
+    doc = Document()
+    doc.add_heading(title, 0)
+    first = True
+
+    if transcript:
+        doc.add_heading("Transcript", 1)
+        p = doc.add_paragraph()
+        p.add_run("The exact words of the lecture, as transcribed by AI. Check it against the audio.").italic = True
+        for line in transcript.split("\n"):
+            if line.strip():
+                doc.add_paragraph(line.strip())
+        first = False
+
+    if notes:
+        if not first:
+            doc.add_page_break()
+        doc.add_heading("Study Notes", 1)
+        p = doc.add_paragraph()
+        p.add_run("Based only on the transcript above.").italic = True
+        add_formatted(doc, notes)
+        first = False
+
+    if lesson:
+        if not first:
+            doc.add_page_break()
+        doc.add_heading("Lesson", 1)
+        p = doc.add_paragraph()
+        p.add_run("Written by AI, not the lecturer. It can make mistakes, so check important facts in your textbook or with your lecturer.").italic = True
+        add_formatted(doc, lesson)
+
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
 
 
-DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-
 uploaded_audio = st.file_uploader(
     "Upload lecture audio", type=["mp3", "wav", "m4a", "aac", "ogg"]
 )
 topic = st.text_input("Course / topic (helps spell terms correctly)")
-title = st.text_input("Title for your files", value="Lecture Notes")
+title = st.text_input("Title for your document", value="Lecture Notes")
 safe = re.sub(r"[^\w\- ]", "", title).strip() or "lecture"
 
 if st.button("1. Transcribe", type="primary"):
@@ -140,6 +166,7 @@ if st.button("1. Transcribe", type="primary"):
             try:
                 st.session_state["transcript"] = transcribe(uploaded_audio, topic)
                 st.session_state.pop("notes", None)
+                st.session_state.pop("lesson", None)
             except Exception as e:
                 st.session_state.pop("transcript", None)
                 st.error(f"Something went wrong: {e}")
@@ -148,12 +175,6 @@ if "transcript" in st.session_state:
     st.subheader("Transcript")
     st.caption("Check this against the audio. You can fix mistakes before making notes.")
     st.text_area("Transcript", key="transcript", height=300, label_visibility="collapsed")
-    st.download_button(
-        "Download transcript (Word)",
-        data=build_docx(title, st.session_state["transcript"], formatted=False),
-        file_name=f"{safe} - transcript.docx",
-        mime=DOCX_MIME,
-    )
 
     if st.button("2. Make notes from transcript", type="primary"):
         with st.spinner("Writing notes..."):
@@ -168,13 +189,6 @@ if "transcript" in st.session_state:
 if "notes" in st.session_state:
     st.subheader("Notes")
     st.markdown(st.session_state["notes"])
-    st.download_button(
-        "Download notes (Word)",
-        data=build_docx(title, st.session_state["notes"], formatted=True),
-        file_name=f"{safe} - notes.docx",
-        mime=DOCX_MIME,
-    )
-
 
 if "transcript" in st.session_state:
     st.divider()
@@ -193,9 +207,19 @@ if "lesson" in st.session_state:
     st.subheader("Lesson (written by AI, not the lecturer)")
     st.warning("AI can make mistakes. Check important facts in your textbook or with your lecturer.")
     st.markdown(st.session_state["lesson"])
+
+if "transcript" in st.session_state:
+    st.divider()
     st.download_button(
-        "Download lesson (Word)",
-        data=build_docx(title, st.session_state["lesson"], formatted=True),
-        file_name=f"{safe} - lesson.docx",
+        "⬇️ Download everything (one Word file)",
+        data=build_full_docx(
+            title,
+            st.session_state.get("transcript"),
+            st.session_state.get("notes"),
+            st.session_state.get("lesson"),
+        ),
+        file_name=f"{safe}.docx",
         mime=DOCX_MIME,
+        type="primary",
     )
+    st.caption("The file includes whatever you have made so far: transcript, notes, and lesson.")
